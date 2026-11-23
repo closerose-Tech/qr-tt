@@ -17,6 +17,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.view.animation.AnimationSet;
 import android.view.animation.TranslateAnimation;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
@@ -67,12 +68,14 @@ public class MainActivity extends Activity {
         String template = DEFAULT_TEMPLATE;
         int randomLen = 24;
         ErrorCorrectionLevel ecl = ErrorCorrectionLevel.M;
-        int qrSizeDp = 220;
+        int qrSizeDp = 30;
+        int quietZone = 4;          // 静区宽度，单位：模块
         int qrColor = Color.rgb(16, 16, 16);
         int qrBgColor = Color.rgb(255, 255, 255);
         int envColor = Color.rgb(232, 238, 246);
         boolean envRandom = false;
         int rotation = 0;
+        boolean mirror = false;     // 镜像二维码
         int slide = 0;              // 0 静止, 1 左->右, 2 右->左
         int animMs = 400;
         long holdMs = 500;
@@ -105,10 +108,10 @@ public class MainActivity extends Activity {
     private TextView tvStatus;
     private TextView tvCurrent;
     private Button btnStart, btnPause, btnStop, btnReset;
-    private EditText etTemplate, etRandomLen, etQrSize, etHold, etGap, etMaxCount,
+    private EditText etTemplate, etRandomLen, etQrSize, etQuietZone, etHold, etGap, etMaxCount,
             etLimitMinutes, etAnimMs, etQrColor, etQrBgColor, etEnvColor;
     private Spinner spEcl, spRotation, spSlide, spHoldUnit, spGapUnit, spDataMode, spCount,
-            spEnvMode, spKeepAwake;
+            spEnvMode, spKeepAwake, spMirror;
     private Button btnQrColor, btnQrBgColor, btnEnvColor;
     private final List<FrameLayout> cells = new ArrayList<>();
     private final List<ImageView> images = new ArrayList<>();
@@ -239,14 +242,16 @@ public class MainActivity extends Activity {
 
         section(form, "二维码外观");
         spEcl = spinnerRow(form, "纠错级别", new String[]{"L (低)", "M (中)", "Q (较高)", "H (最高)"});
-        etQrSize = inputRow(form, "显示尺寸(dp)", "220", InputType.TYPE_CLASS_NUMBER);
+        etQrSize = inputRow(form, "显示尺寸(dp)", "30", InputType.TYPE_CLASS_NUMBER);
+        etQuietZone = inputRow(form, "静区(模块数)", "4", InputType.TYPE_CLASS_NUMBER);
         btnQrColor = colorRow(form, "本体颜色", cfg.qrColor);
         btnQrBgColor = colorRow(form, "背景颜色", cfg.qrBgColor);
         btnEnvColor = colorRow(form, "环境颜色", cfg.envColor);
         spEnvMode = spinnerRow(form, "环境色变化", new String[]{"固定颜色", "随数据随机"});
         spRotation = spinnerRow(form, "二维码方向", new String[]{"0°", "90°", "180°", "270°"});
-        spSlide = spinnerRow(form, "出现方式", new String[]{"静止", "从左向右", "从右向左"});
-        etAnimMs = inputRow(form, "滑入时长(ms)", "400", InputType.TYPE_CLASS_NUMBER);
+        spMirror = spinnerRow(form, "镜像显示", new String[]{"正常", "镜像码"});
+        spSlide = spinnerRow(form, "滑动方式", new String[]{"静止", "从左向右", "从右向左"});
+        etAnimMs = inputRow(form, "滑入/滑出时长(ms)", "400", InputType.TYPE_CLASS_NUMBER);
 
         section(form, "变化时序与停止条件");
         etHold = inputRow(form, "数据保持时间", "500", InputType.TYPE_CLASS_NUMBER);
@@ -259,7 +264,7 @@ public class MainActivity extends Activity {
         spKeepAwake = spinnerRow(form, "屏幕常亮", new String[]{"开启", "关闭"});
 
         TextView hint = new TextView(this);
-        hint.setText("说明：保持时间 = 二维码展示时长；变化间隔 = 两张码之间的空白时长；两者均可在 1ms ~ 10s 内设置。");
+        hint.setText("说明：保持时间 = 二维码展示时长（滑动时包含滑入与滑出）；变化间隔 = 两张码之间的空白时长。滑动方式下二维码从一侧滑入、从另一侧滑出。");
         hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         hint.setTextColor(Color.rgb(110, 116, 126));
         hint.setPadding(0, dp(10), 0, 0);
@@ -457,6 +462,7 @@ public class MainActivity extends Activity {
         etTemplate.setText(cfg.template);
         etRandomLen.setText(String.valueOf(cfg.randomLen));
         etQrSize.setText(String.valueOf(cfg.qrSizeDp));
+        etQuietZone.setText(String.valueOf(cfg.quietZone));
         etHold.setText(String.valueOf(cfg.holdMs >= 1000 && cfg.holdMs % 1000 == 0 ? cfg.holdMs / 1000 : cfg.holdMs));
         spHoldUnit.setSelection(cfg.holdMs >= 1000 && cfg.holdMs % 1000 == 0 ? 1 : 0);
         etGap.setText(String.valueOf(cfg.gapMs >= 1000 && cfg.gapMs % 1000 == 0 ? cfg.gapMs / 1000 : cfg.gapMs));
@@ -466,6 +472,7 @@ public class MainActivity extends Activity {
         etAnimMs.setText(String.valueOf(cfg.animMs));
         spEcl.setSelection(eclIndex(cfg.ecl));
         spRotation.setSelection(cfg.rotation / 90);
+        spMirror.setSelection(cfg.mirror ? 1 : 0);
         spSlide.setSelection(cfg.slide);
         spCount.setSelection(cfg.qrCount - 1);
         spDataMode.setSelection(cfg.sameData ? 1 : 0);
@@ -494,7 +501,8 @@ public class MainActivity extends Activity {
         cfg.template = text(etTemplate, DEFAULT_TEMPLATE).trim();
         if (cfg.template.isEmpty()) cfg.template = DEFAULT_TEMPLATE;
         cfg.randomLen = clamp(intOf(etRandomLen, 24), 1, 64);
-        cfg.qrSizeDp = clamp(intOf(etQrSize, 220), 80, 600);
+        cfg.qrSizeDp = clamp(intOf(etQrSize, 30), 8, 600);
+        cfg.quietZone = clamp(intOf(etQuietZone, 4), 0, 20);
         cfg.holdMs = timeMs(etHold, spHoldUnit, 500);
         cfg.gapMs = timeMs(etGap, spGapUnit, 200);
         cfg.maxCount = clamp(intOf(etMaxCount, 100), 0, 1000000);
@@ -506,6 +514,7 @@ public class MainActivity extends Activity {
                 : spEcl.getSelectedItemPosition() == 3 ? ErrorCorrectionLevel.H
                 : ErrorCorrectionLevel.M;
         cfg.rotation = spRotation.getSelectedItemPosition() * 90;
+        cfg.mirror = spMirror.getSelectedItemPosition() == 1;
         cfg.slide = spSlide.getSelectedItemPosition();
         cfg.qrCount = clamp(spCount.getSelectedItemPosition() + 1, 1, 6);
         cfg.sameData = spDataMode.getSelectedItemPosition() == 1;
@@ -548,6 +557,7 @@ public class MainActivity extends Activity {
         e.putString("template", cfg.template);
         e.putInt("randomLen", cfg.randomLen);
         e.putInt("qrSize", cfg.qrSizeDp);
+        e.putInt("quiet", cfg.quietZone);
         e.putLong("hold", cfg.holdMs);
         e.putLong("gap", cfg.gapMs);
         e.putInt("maxCount", cfg.maxCount);
@@ -555,6 +565,7 @@ public class MainActivity extends Activity {
         e.putInt("anim", cfg.animMs);
         e.putInt("ecl", eclIndex(cfg.ecl));
         e.putInt("rotation", cfg.rotation);
+        e.putBoolean("mirror", cfg.mirror);
         e.putInt("slide", cfg.slide);
         e.putInt("count", cfg.qrCount);
         e.putBoolean("sameData", cfg.sameData);
@@ -571,6 +582,7 @@ public class MainActivity extends Activity {
         cfg.template = sp.getString("template", cfg.template);
         cfg.randomLen = sp.getInt("randomLen", cfg.randomLen);
         cfg.qrSizeDp = sp.getInt("qrSize", cfg.qrSizeDp);
+        cfg.quietZone = sp.getInt("quiet", cfg.quietZone);
         cfg.holdMs = sp.getLong("hold", cfg.holdMs);
         cfg.gapMs = sp.getLong("gap", cfg.gapMs);
         cfg.maxCount = sp.getInt("maxCount", cfg.maxCount);
@@ -580,6 +592,7 @@ public class MainActivity extends Activity {
         cfg.ecl = e == 0 ? ErrorCorrectionLevel.L : e == 2 ? ErrorCorrectionLevel.Q
                 : e == 3 ? ErrorCorrectionLevel.H : ErrorCorrectionLevel.M;
         cfg.rotation = sp.getInt("rotation", 0);
+        cfg.mirror = sp.getBoolean("mirror", false);
         cfg.slide = sp.getInt("slide", 0);
         cfg.qrCount = sp.getInt("count", 1);
         cfg.sameData = sp.getBoolean("sameData", false);
@@ -611,7 +624,7 @@ public class MainActivity extends Activity {
         Map<EncodeHintType, Object> hints = new EnumMap<>(EncodeHintType.class);
         hints.put(EncodeHintType.CHARACTER_SET, "UTF-8");
         hints.put(EncodeHintType.ERROR_CORRECTION, cfg.ecl);
-        hints.put(EncodeHintType.MARGIN, 1);
+        hints.put(EncodeHintType.MARGIN, cfg.quietZone);
         try {
             BitMatrix matrix = new QRCodeWriter().encode(data, BarcodeFormat.QR_CODE,
                     sizePx, sizePx, hints);
@@ -625,9 +638,11 @@ public class MainActivity extends Activity {
                 }
             }
             bmp.setPixels(pixels, 0, sizePx, 0, 0, sizePx, sizePx);
-            if (cfg.rotation != 0) {
+            if (cfg.rotation != 0 || cfg.mirror) {
+                float cx = sizePx / 2f, cy = sizePx / 2f;
                 Matrix m = new Matrix();
-                m.setRotate(cfg.rotation, sizePx / 2f, sizePx / 2f);
+                if (cfg.rotation != 0) m.setRotate(cfg.rotation, cx, cy);
+                if (cfg.mirror) m.postScale(-1f, 1f, cx, cy);   // 水平镜像
                 bmp = Bitmap.createBitmap(bmp, 0, 0, sizePx, sizePx, m, true);
             }
             return bmp;
@@ -746,21 +761,30 @@ public class MainActivity extends Activity {
         int stageDp = stage.getHeight() > 0 ? (int) (stage.getHeight() / density) : 300;
         int sizeDp = Math.min(cfg.qrSizeDp, screenDp / columns - 32);
         sizeDp = Math.min(sizeDp, stageDp / rows - 12);
-        int sizePx = dp(Math.max(60, sizeDp));
+        int sizePx = dp(Math.max(8, sizeDp));
 
         StringBuilder shown = new StringBuilder();
         for (int i = 0; i < images.size(); i++) {
             String data = common != null ? common : nextData();
             Bitmap bmp = qrBitmap(data, sizePx);
             ImageView iv = images.get(i);
+            iv.clearAnimation();
             iv.setImageBitmap(bmp);
             iv.setLayoutParams(new FrameLayout.LayoutParams(sizePx, sizePx, Gravity.CENTER));
             if (cfg.slide != 0) {
-                float from = cfg.slide == 1 ? -sizePx * 1.2f : sizePx * 1.2f;
-                TranslateAnimation anim = new TranslateAnimation(from, 0, 0, 0);
-                anim.setDuration(cfg.animMs);
-                anim.setFillAfter(false);
-                iv.startAnimation(anim);
+                // 滑入时长与滑出时长相同，中间停留剩余时间；总时长不超过数据保持时间。
+                long slideMs = Math.max(1, Math.min(cfg.animMs, cfg.holdMs / 2));
+                long dwellMs = Math.max(0, cfg.holdMs - slideMs * 2);
+                float from = cfg.slide == 1 ? -sizePx * 1.25f : sizePx * 1.25f;
+                TranslateAnimation inAnim = new TranslateAnimation(from, 0, 0, 0);
+                inAnim.setDuration(slideMs);
+                TranslateAnimation outAnim = new TranslateAnimation(0, -from, 0, 0);
+                outAnim.setDuration(slideMs);
+                outAnim.setStartOffset(slideMs + dwellMs);   // 停留后才从另一侧滑出
+                AnimationSet set = new AnimationSet(true);
+                set.addAnimation(inAnim);
+                set.addAnimation(outAnim);
+                iv.startAnimation(set);
             }
             if (i == 0) shown.append(data);
         }
