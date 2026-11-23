@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="QrttTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFF4F6FA</item>
+        <item name="android:colorAccent">#FF2962FF</item>
+        <item name="android:statusBarColor">#FF2962FF</item>
+        <item name="android:textColorPrimary">#FF202124</item>
+    </style>
+</resources>
